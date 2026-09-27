@@ -16,4 +16,4 @@ This repository builds `discourse-axi`, an agent-facing CLI generated from Disco
 - Forum selection is explicit: flag, environment, then `.discourse-forum` at the worktree's Git root. Only `init` writes a binding.
 - Never inspect or print real credential files, token values, authorization codes or callback URLs containing codes. Keep test credentials generated at runtime and stored only outside the repository.
 - Never retry an ambiguous tool call automatically. MCP annotations are hints, not user permission to write.
-- Live forum mutations, publishing, uploads, pushes and hosting files require explicit authorization. CI checks and packs; it does not publish.
+- Live forum mutations, publishing, uploads, pushes and hosting files require explicit authorization. CI checks and packs on every push and pull request; pushing a tag publishes to npm and creates a GitHub release, so tag only when a release is authorized.

@@ -2,8 +2,16 @@
   "name": "@nikolauska/discourse-axi",
   "version": "0.1.0",
   "description": "Agent-facing CLI generated from Discourse MCP tools",
+  "homepage": "https://github.com/nikolauska/discourse-axi#readme",
+  "bugs": {
+    "url": "https://github.com/nikolauska/discourse-axi/issues"
+  },
   "license": "MIT",
   "author": "nikolauska",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nikolauska/discourse-axi.git"
+  },
   "bin": {
     "discourse-axi": "dist/bin.js"
   },
@@ -14,6 +22,9 @@
     "README.md"
   ],
   "type": "module",
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "tsc",
     "build:skill": "node scripts/build-skill.ts",
