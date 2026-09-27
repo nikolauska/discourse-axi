@@ -1,6 +1,6 @@
 {
   "name": "@nikolauska/discourse-axi",
-  "version": "0.1.0",
+  "version": "0.0.1",
   "description": "Agent-facing CLI generated from Discourse MCP tools",
   "homepage": "https://github.com/nikolauska/discourse-axi#readme",
   "bugs": {
