@@ -133,14 +133,28 @@ export function toolArguments(tool: Tool, args: string[]) {
       "JSON Schema draft-07, 2019-09 and 2020-12 with local references are supported",
     ]);
   }
-  if (!validate(input))
-    throw usage(
-      "Tool arguments do not match its schema",
-      (validate.errors ?? []).map(
-        (e) =>
-          `${e.instancePath || "/"} ${e.message ?? e.keyword}${e.keyword === "required" ? `: ${e.params.missingProperty}` : ""}`,
-      ),
+  if (!validate(input)) {
+    // Report problems in the vocabulary the caller used: flags where one exists, JSON paths otherwise.
+    const flagFor = new Map(
+      Object.entries(flags).flatMap(([flag, value]) => (value.key ? [[value.key, flag]] : [])),
     );
+    const name = (path: string) => {
+      const [, first, ...rest] = path.split("/");
+      const flag =
+        first === undefined
+          ? undefined
+          : flagFor.get(first.replaceAll("~1", "/").replaceAll("~0", "~"));
+      return flag ? `--${flag}${rest.length ? ` item ${rest.join("/")}` : ""}` : path || "input";
+    };
+    throw usage("Tool arguments do not match its schema; nothing was sent", [
+      ...(validate.errors ?? []).map((e) =>
+        e.keyword === "required"
+          ? `${name(`${e.instancePath}/${e.params.missingProperty}`)} is required`
+          : `${name(e.instancePath)} ${e.message ?? e.keyword}`,
+      ),
+      "Run this command with --help for its flags and constraints",
+    ]);
+  }
   return { parsed, input };
 }
 

@@ -98,38 +98,56 @@ test("built-in and normalization collisions remain individually addressable rega
 test("tool errors cannot become success even with structured content", () => {
   assert.throws(
     () =>
-      resultValue({
-        isError: true,
-        structuredContent: { ok: true },
-        content: [{ type: "text", text: "rejected" }],
-      }),
+      resultValue(
+        {
+          isError: true,
+          structuredContent: { ok: true },
+          content: [{ type: "text", text: "rejected" }],
+        },
+        "x",
+      ),
     { code: "OPERATION_ERROR" },
   );
   assert.throws(
-    () => resultValue({ isError: true, content: [{ type: "text", text: "insufficient_scope" }] }),
+    () =>
+      resultValue({ isError: true, content: [{ type: "text", text: "insufficient_scope" }] }, "x"),
     { code: "FORBIDDEN" },
+  );
+  // A post or topic number in tool text is not an HTTP status.
+  assert.throws(
+    () =>
+      resultValue({ isError: true, content: [{ type: "text", text: "Post 401 not found" }] }, "x"),
+    { code: "OPERATION_ERROR" },
   );
 });
 
 test("structured content wins; JSON, plain and mixed content remain useful", () => {
   assert.deepEqual(
-    resultValue({
-      structuredContent: { correct: true },
-      content: [{ type: "text", text: '{"wrong":true}' }],
-    }),
+    resultValue(
+      {
+        structuredContent: { correct: true },
+        content: [{ type: "text", text: '{"wrong":true}' }],
+      },
+      "x",
+    ),
     { correct: true },
   );
-  assert.deepEqual(resultValue({ content: [{ type: "text", text: '{"id":42}' }] }), { id: 42 });
-  assert.deepEqual(resultValue({ content: [{ type: "text", text: "Long readable post" }] }), {
+  assert.deepEqual(resultValue({ content: [{ type: "text", text: '{"id":42}' }] }, "x"), {
+    id: 42,
+  });
+  assert.deepEqual(resultValue({ content: [{ type: "text", text: "Long readable post" }] }, "x"), {
     text: "Long readable post",
   });
   assert.deepEqual(
-    resultValue({
-      content: [
-        { type: "text", text: "first" },
-        { type: "text", text: '{"id":7}' },
-      ],
-    }),
+    resultValue(
+      {
+        content: [
+          { type: "text", text: "first" },
+          { type: "text", text: '{"id":7}' },
+        ],
+      },
+      "x",
+    ),
     {
       content: [
         { type: "text", text: "first" },
@@ -138,8 +156,11 @@ test("structured content wins; JSON, plain and mixed content remain useful", () 
     },
   );
   const full = { post: "x".repeat(4001) };
-  assert.deepEqual(preview(full, false), {
-    post: `${"x".repeat(4000)}\n[truncated 1 characters; use --full]`,
-  });
+  const shortened = preview(full, false).post;
+  assert.ok(shortened.startsWith(`${"x".repeat(4000)}\n[truncated`));
+  assert.match(shortened, /--full\]$/);
   assert.equal(preview(full, true), full);
+  assert.deepEqual(resultValue({ content: [{ type: "text", text: "[1,2]" }] }, "list"), {
+    result: [1, 2],
+  });
 });

@@ -100,7 +100,7 @@ test("401 and 403 during initialize have actionable login hints", async (t) => {
   const insufficient = await run(["tools"]);
   assert.equal(insufficient.exit, 1);
   assert.match(insufficient.stdout, /FORBIDDEN/);
-  assert.match(insufficient.stdout, /Re-run/);
+  assert.match(insufficient.stdout, /auth login/);
 });
 
 test("unknown server tool refreshes catalog without replaying the call", async (t) => {
@@ -120,7 +120,7 @@ test("ambiguous disconnect never retries an unannotated mutation", async (t) => 
   const result = await run(["plugin-write"]);
   assert.equal(result.exit, 1);
   assert.equal(server.state.calls.length, 1);
-  assert.match(result.stdout, /no tool call was automatically retried/);
+  assert.match(result.stdout, /OPERATION_ERROR/);
 });
 
 test("tools refresh and cache identity prevent stale scopes or credentials sharing discovery", async (t) => {
@@ -137,12 +137,15 @@ test("tools refresh and cache identity prevent stale scopes or credentials shari
   assert.match(rejected.stdout, /NOT_AUTHENTICATED/);
 });
 
-test("missing forum fails; unauthenticated dashboard and top help need no network", async (t) => {
+test("missing forum: home explains setup, commands fail; logged-out home and help need no network", async (t) => {
   const { server, run, env } = await setup(t);
   const empty = { HOME: env.HOME };
-  const missing = await run([], empty);
+  const home = await run([], empty);
+  assert.equal(home.exit, 0);
+  assert.match(home.stdout, /init --forum <url>/);
+  const missing = await run(["tools"], empty);
   assert.equal(missing.exit, 2);
-  assert.match(missing.stdout, /No forum configured/);
+  assert.match(missing.stdout, /VALIDATION_ERROR/);
   assert.equal((await run(["--help"], empty)).exit, 0);
   assert.equal((await run(["auth", "login", "--help"], empty)).exit, 0);
   assert.equal((await run(["tools", "--manual", "--help"], empty)).exit, 2);
@@ -174,7 +177,45 @@ test("worktree binding stays local and explicit flag overrides environment and b
     (await resolveForum("https://explicit.example", env, directory)).forum,
     "https://explicit.example",
   );
+  assert.equal((await run(["init", "--forum", server.origin])).exit, 0);
   assert.equal((await run(["init", "--forum", "https://replacement.example"])).exit, 2);
   assert.equal((await run(["init", "--forum", "https://replacement.example", "--force"])).exit, 0);
   assert.equal((await resolveForum(undefined, {}, directory)).forum, "https://replacement.example");
+});
+
+test("suggested commands carry an explicit --forum and omit it for a configured forum", async (t) => {
+  const { server, run, env } = await setup(t);
+  const loggedOut = { ...env, DISCOURSE_AXI_MCP_TOKEN: undefined };
+  const explicit = await run(["auth", "status", "--forum", server.origin], {
+    ...loggedOut,
+    DISCOURSE_AXI_FORUM_URL: undefined,
+  });
+  assert.match(explicit.stdout, new RegExp(`auth login --forum ${server.origin}\``));
+  const configured = await run(["auth", "status"], loggedOut);
+  assert.match(configured.stdout, /`discourse-axi auth login`/);
+});
+
+test("tools shortens long descriptions visibly; --full and command help keep all of it", async (t) => {
+  const { server, run } = await setup(t);
+  const description = `Inspect things. ${"detail ".repeat(40)}end-of-description`;
+  server.state.tools[1] = { ...server.state.tools[1], description };
+  const list = await run(["tools"]);
+  assert.match(list.stdout, /…\[truncated\]/);
+  assert.doesNotMatch(list.stdout, /end-of-description/);
+  assert.match((await run(["tools", "--full"])).stdout, /end-of-description/);
+  const help = await run(["custom-inspect", "--help"]);
+  assert.equal(help.exit, 0);
+  assert.match(help.stdout, /end-of-description/);
+});
+
+test("generated help lists required flags and inputs only reachable through --json", async (t) => {
+  const { server, run } = await setup(t);
+  const help = await run(["search-posts", "--help"]);
+  assert.equal(help.exit, 0);
+  assert.match(help.stdout, /usage: "discourse-axi search-posts --query <value>/);
+  assert.match(help.stdout, /jsonOnly/);
+  assert.match(help.stdout, /property: filter/);
+  assert.doesNotMatch(help.stdout, /inputSchema/);
+  assert.match((await run(["search-posts", "--help", "--full"])).stdout, /inputSchema/);
+  assert.equal(server.state.calls.length, 0);
 });

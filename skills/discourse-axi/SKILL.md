@@ -1,34 +1,22 @@
 ---
 name: discourse-axi
-description: Use discourse-axi to discover and call the tools enabled by a Discourse forum over MCP.
+description: "Read and act on a Discourse forum (topics, posts, search, chat, users, moderation) through the discourse-axi CLI, whose commands are generated from the forum's MCP tools. Use whenever a task touches a Discourse forum. Do not use for other forum software."
 ---
 
-# Discourse MCP CLI
+# discourse-axi
 
-Select a forum with `--forum <base-url>`, `DISCOURSE_AXI_FORUM_URL`, or an explicit repository binding. No default forum exists. Run `discourse-axi` for local auth state and a short tool summary.
+Agent-facing Discourse CLI over MCP; commands come from the selected forum's tools.
 
-## Commands
+If `discourse-axi` is not installed, ask the user to install it with `npm install -g @nikolauska/discourse-axi` (Node.js 24 or newer).
 
-- `discourse-axi init --forum <url> [--force]`: Bind this Git worktree to a forum (writes .discourse-forum).
-- `discourse-axi auth login [--manual]`: Request all advertised OAuth scopes; print the browser URL to stderr.
-- `discourse-axi auth finish`: Read the complete callback URL from stdin and verify state and issuer.
-- `discourse-axi auth status`: Show local auth state without exposing credentials.
-- `discourse-axi auth logout`: Remove only this MCP resource's locally stored credentials.
-- `discourse-axi tools [refresh]`: Discover every enabled tool and its generated command.
-- `discourse-axi <generated-command> --help`: Show live tool description, schema, flags and safety annotations.
-- `discourse-axi help / --help`: Show help without authentication or a configured forum.
-- `discourse-axi version / --version`: Show the installed version.
+The CLI documents itself; read its help instead of guessing:
 
-## Workflow and safety
+- `discourse-axi` shows the selected forum, auth state, a tool summary and the next command.
+- `discourse-axi --help` covers forum selection, login, workflow, output, exit codes and safety rules.
+- `discourse-axi <command> --help` shows a command's flags and required inputs, including every generated forum tool.
+- Follow the `help:` hints in responses and errors.
 
-1. Run `auth status`; if needed, run `auth login` and ask the user to approve the browser consent screen. Login requests every advertised scope; the forum decides what the account may grant.
-2. Run `tools` and inspect a generated command's `--help` before calling it. Plugin tools need no CLI changes.
-3. Read `readOnly` and `destructive` annotations, but treat them as hints, not permission to mutate. Get user authorization for writes.
-4. Use repeatable array flags and `--json '<object>'` for nested input or exact property names. All input is schema-validated.
-5. Output is TOON. Long strings explicitly say they were truncated; use `--full` to remove local truncation. Server-side truncation cannot be undone.
+## Rules
 
-Command names drop a leading `discourse_` and use kebab-case. Built-in collisions gain `tool-`; remaining collisions get `-2`, `-3`, etc. in sorted tool-name order. Use `tools refresh` after server configuration changes.
-
-Never print credential files or put OAuth callback URLs/codes/tokens in shell history, reports or fixtures. Manual completion reads the entire callback URL from stdin via `auth finish`. `DISCOURSE_AXI_MCP_TOKEN` bypasses OAuth. Logout removes local credentials only, not server grants or environment tokens.
-
-No tool call is automatically retried, including after a timeout. Inspect forum state before retrying a write. A tool's `isError` response is a failed command, never success data. Exit codes are 0 success, 2 usage, 1 operation failure.
+- Get the user's authorization before any write; tool annotations are hints, not permission.
+- Never print credential files, tokens, or OAuth callback URLs and codes.

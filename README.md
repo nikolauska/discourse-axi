@@ -6,12 +6,12 @@ Requires Node.js 24+. Package: `@nikolauska/discourse-axi`, executable: `discour
 
 ## Install and discover
 
-Install from a local package tarball:
-
 ```sh
-npm install --global ./nikolauska-discourse-axi-0.1.0.tgz
+npm install --global @nikolauska/discourse-axi
 discourse-axi --help
 ```
+
+`discourse-axi update` upgrades a global install to the latest published version; `discourse-axi update --check` only reports whether one exists.
 
 Installing the executable does not install agent instructions or change agent configuration. The package includes `skills/discourse-axi/SKILL.md`; install that skill separately through your agent host's supported mechanism.
 
@@ -23,6 +23,8 @@ discourse-axi search-posts --help --forum https://forum.example.org
 
 `search-posts` is only an example: actual commands, permissions and schemas come from discovery. Run a command only after inspecting its help and getting authorization for any writes.
 
+`discourse-axi --help` is the complete agent-facing reference: forum selection, login workflow, output, exit codes and safety rules. The bundled skill is intentionally short and points agents to it.
+
 ## Forum selection
 
 Precedence:
@@ -31,13 +33,18 @@ Precedence:
 2. `DISCOURSE_AXI_FORUM_URL`.
 3. `.discourse-forum`, containing the URL on one line at this Git worktree's root.
 
-There is no implicit default. Bind a repository explicitly with `discourse-axi init --forum <url>`; use `--force` to replace a binding. Reads never create one. Nested directories resolve the same root; `.git` files work for linked worktrees. The binding is non-secret and ignored by this repository; projects may choose to track it.
+There is no implicit default. Bind a repository explicitly with `discourse-axi init --forum <url>`; use `--force` to replace a binding to a different forum. Binding the same forum again succeeds without changes. Reads never create one. Nested directories resolve the same root; `.git` files work for linked worktrees. The binding is non-secret and ignored by this repository; projects may choose to track it.
 
 The endpoint is `<forum-base>/mcp`. `DISCOURSE_AXI_MCP_URL` overrides it without changing forum selection. URLs must use HTTPS, except loopback HTTP for local development; credentials, query strings and fragments are rejected.
 
 ## OAuth
 
-`auth login` discovers protected-resource and authorization-server metadata, requests **all advertised protected-resource scopes**, and prints a browser URL to stderr. Open it and approve access. The forum still limits grants to the account's allowed groups and permissions. The CLI waits up to ten minutes for a loopback callback. Public-client token requests use authentication method `none`, authorization code and PKCE S256, resource binding, random state, and issuer verification.
+`auth login` discovers protected-resource and authorization-server metadata, requests **all advertised protected-resource scopes**, and prints a browser URL to stderr. Open it and approve access. The forum still limits grants to the account's allowed groups and permissions. The CLI waits up to ten minutes for a loopback callback; when the callback port cannot be bound it returns `login-pending` immediately and the login is completed with `auth finish`.
+
+Two timers apply to a login:
+
+- The local pending login (PKCE verifier and state) stays valid for 24 hours after `auth login`, so a slow approval does not invalidate it. A new `auth login` replaces it.
+- The forum's authorization code is issued when the user approves and expires after the site setting `mcp_authorization_code_lifetime_seconds` (Discourse default 300 seconds, allowed 60–600). Run `auth finish` right after approving. A code that expired or was already used fails with `NOT_AUTHENTICATED`; run `auth login` and approve again. Public-client token requests use authentication method `none`, authorization code and PKCE S256, resource binding, random state, and issuer verification.
 
 Client presets, tried in this order:
 
@@ -59,7 +66,7 @@ discourse-axi auth login --manual --forum https://forum.example.org
 discourse-axi auth finish --forum https://forum.example.org
 ```
 
-For `auth finish`, supply the **complete callback URL on stdin**, then EOF. Use a private stdin pipe or terminal with echo disabled; do not put the URL in command arguments, shell history, logs or issue reports. A bare code is insufficient because state and issuer must be checked. `iss` is required when advertised and always checked when present. A browser may report connection refused in manual mode; copy its callback URL privately rather than retrying authorization.
+For `auth finish`, supply the **complete callback URL on stdin**, then EOF, for example `read -rs callback_url && printf '%s\n' "$callback_url" | discourse-axi auth finish`. It fails immediately when stdin is a terminal instead of waiting for input. Do not put the URL in command arguments, shell history, logs or issue reports. A bare code is insufficient because state and issuer must be checked. `iss` is required when advertised and always checked when present. A browser may report connection refused in manual mode; copy its callback URL privately rather than retrying authorization.
 
 ```sh
 discourse-axi auth status --forum https://forum.example.org
@@ -74,7 +81,7 @@ See also [Discourse's MCP announcement](https://meta.discourse.org/t/connect-you
 
 ## Generated commands and validation
 
-Discovery follows every `tools/list.nextCursor`; repeated cursors or duplicate tool names are errors. Command names drop a leading `discourse_`, convert to kebab-case, and sort by original tool name. Names colliding with `auth`, `init`, `tools`, `help` or `version` gain `tool-`. Remaining collisions receive `-2`, `-3`, etc. `tools` always shows the original tool name too.
+Discovery follows every `tools/list.nextCursor`; repeated cursors or duplicate tool names are errors. Command names drop a leading `discourse_`, convert to kebab-case, and sort by original tool name. Names colliding with `auth`, `init`, `tools`, `help` or `update` gain `tool-`. Remaining collisions receive `-2`, `-3`, etc. `tools` always shows the original tool name too.
 
 - String, integer, number, boolean and enum constraints come from JSON Schema.
 - Top-level scalar properties become flags; scalar arrays become repeatable flags, one item per occurrence.
@@ -82,17 +89,17 @@ Discovery follows every `tools/list.nextCursor`; repeated cursors or duplicate t
 - `--flag=value` is supported. Duplicate scalar flags, unknown flags and positional arguments fail.
 - Required fields, numeric bounds, enums, arrays, object rules and schema composition are validated before sending.
 - `--json '<object>'` passes nested input, unions, arrays of objects, exact property names, and names colliding with CLI flags. A property cannot appear in both JSON and a flag. JSON Schema draft-07, 2019-09 and 2020-12 are supported, with local `$ref` and standard formats. Remote schema references are not fetched.
-- Help includes the full input schema and server annotations. `readOnlyHint` and `destructiveHint` are advisory, not permission to mutate.
+- `<command> --help` lists each flag with its type, requirement and constraints, the inputs only reachable through `--json`, and server annotations. `--help --full` adds the complete input schema. `readOnlyHint` and `destructiveHint` are advisory, not permission to mutate.
 
 The catalog is cached for 15 minutes under `$XDG_CACHE_HOME/discourse-axi` (default `~/.cache/discourse-axi`), keyed by forum, MCP resource, granted scopes and an irreversible token fingerprint. This also isolates different accounts and direct tokens whose scopes cannot be discovered. Tokens themselves are not cached. `tools refresh` forces discovery. Unknown generated commands or unknown-tool responses refresh the catalog; a failed call is **never replayed**, even if discovery changes its schema.
 
 ## Results, dashboard and errors
 
-No arguments shows the forum, local auth state, tool count and up to eight commands. Logged-out users get login help without an MCP request. `--help` and `--version` work without a forum or network access.
+No arguments shows the forum, local auth state, tool count and up to eight commands, with the next command to run. Without a selected forum it explains how to choose one; logged-out users get login help without an MCP request. `--help`, built-in command help and `--version` work without a forum or network access. Suggested commands keep an explicit `--forum` and omit it when the forum comes from the environment or binding.
 
-Results use TOON. `isError` always fails. Structured content takes precedence; otherwise JSON text is parsed, then plain text retained. Multiple content blocks and non-text blocks are preserved as data, not rendered as images/audio. Strings longer than 4,000 characters explicitly show truncation; `--full` removes local truncation but cannot recover text omitted by the server. Tool error bodies are not echoed because they can contain submitted secrets.
+Results use TOON. `tools` shortens long descriptions with a `…[truncated]` marker; `tools --full` or `<command> --help` shows the full text. `isError` always fails. Structured content takes precedence; otherwise JSON text is parsed, then plain text retained. Multiple content blocks and non-text blocks are preserved as data, not rendered as images/audio. Strings longer than 4,000 characters explicitly show truncation; `--full` removes local truncation but cannot recover text omitted by the server. Tool error bodies are not echoed because they can contain submitted secrets.
 
-Progress goes to stderr; results and structured errors go to stdout. Exit codes: `0` success, `2` usage error, `1` operational failure. No tool call is automatically retried after timeout or connection failure. A failed write may have completed: inspect forum state before manually retrying it.
+Progress goes to stderr; results and structured errors (`error`, `code`, `help`) go to stdout. Exit codes: `0` success, including already-satisfied requests; `2` usage or input error; `1` operational, authentication, network or tool failure. No tool call is automatically retried after timeout or connection failure. A failed write may have completed: inspect forum state before manually retrying it.
 
 ## Limits
 

@@ -10,10 +10,11 @@ export interface McpLike {
 }
 
 export class DiscourseMcp implements McpLike {
-  private client = new Client({ name: "discourse-axi", version: "0.1.0" });
+  private client: Client;
   private transport: StreamableHTTPClientTransport;
   private connected = false;
-  constructor(resource: string, token: string) {
+  constructor(resource: string, token: string, version: string) {
+    this.client = new Client({ name: "discourse-axi", version });
     this.transport = new StreamableHTTPClientTransport(new URL(resource), {
       requestInit: { headers: { authorization: `Bearer ${token}` }, redirect: "error" },
       // Replaying a disconnected POST could duplicate a reply or moderation action.
@@ -75,27 +76,35 @@ export function isUnknownTool(error: unknown): boolean {
   );
 }
 
-export function resultValue(result: CallToolResult): unknown {
+export function resultValue(result: CallToolResult, command: string): Record<string, unknown> {
   if (result.isError) {
     const text = result.content
       .filter((c) => c.type === "text")
       .map((c) => c.text)
       .join("\n");
-    if (/insufficient_scope|\b403\b/i.test(text))
-      throw normalizeError(new Error("insufficient_scope"));
-    if (/\b401\b|unauthorized|invalid_token/i.test(text)) throw normalizeError(new Error("401"));
+    // Only OAuth error codes count; free text such as "post 401 not found" is an ordinary failure.
+    if (/\binsufficient_scope\b/.test(text)) throw normalizeError(new Error("insufficient_scope"));
+    if (/\binvalid_token\b/.test(text)) throw normalizeError(new Error("invalid_token"));
     // Error bodies can echo submitted secrets. Keep them out of logs and stdout.
-    throw operation("The MCP tool reported an error; it did not return success data", [
-      "Check the arguments and forum permissions; inspect forum state before retrying a write",
+    throw operation("The tool reported an error (isError); its message is withheld", [
+      `Check the inputs with \`discourse-axi ${command} --help\` and the account's forum permissions`,
+      "A write may already have partly completed: inspect forum state before running it again",
     ]);
   }
   if (result.structuredContent !== undefined) return result.structuredContent;
+  // An explicit marker keeps "no output" from looking like a missing or broken response.
+  if (result.content.length === 0) return { result: "The tool succeeded and returned no content" };
   if (result.content.length === 1 && result.content[0].type === "text") {
+    let parsed: unknown;
     try {
-      return JSON.parse(result.content[0].text);
+      parsed = JSON.parse(result.content[0].text);
     } catch {
       return { text: result.content[0].text };
     }
+    // Scalars and arrays are wrapped so every result renders as one TOON document.
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : { result: parsed };
   }
   return {
     content: result.content.map((item) => {
@@ -109,16 +118,18 @@ export function resultValue(result: CallToolResult): unknown {
   };
 }
 
-export function preview(value: unknown, full: boolean): unknown {
+export function preview<T>(value: T, full: boolean): T {
   if (full) return value;
+  return truncate(value) as T;
+}
+
+function truncate(value: unknown): unknown {
   if (typeof value === "string")
     return value.length > 4000
-      ? `${value.slice(0, 4000)}\n[truncated ${value.length - 4000} characters; use --full]`
+      ? `${value.slice(0, 4000)}\n[truncated ${value.length - 4000} more characters; rerun with --full]`
       : value;
-  if (Array.isArray(value)) return value.map((item) => preview(item, false));
+  if (Array.isArray(value)) return value.map(truncate);
   if (value && typeof value === "object")
-    return Object.fromEntries(
-      Object.entries(value).map(([key, item]) => [key, preview(item, false)]),
-    );
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, truncate(item)]));
   return value;
 }

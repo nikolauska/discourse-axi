@@ -26,6 +26,10 @@ const ServerMetadata = Metadata.extend({
   code_challenge_methods_supported: z.array(z.string()),
   token_endpoint_auth_methods_supported: z.array(z.string()),
 });
+// The forum's authorization code, not this local PKCE state, is the short-lived part: Discourse
+// issues it only on approval and expires it after mcp_authorization_code_lifetime_seconds
+// (default 300). Local state therefore has to survive however long a human takes to approve.
+const PENDING_LIFETIME_MS = 24 * 60 * 60_000;
 const TokenResponse = z.object({
   access_token: z.string().min(1),
   token_type: z.string(),
@@ -99,7 +103,7 @@ export class OAuth {
       ...discovered,
       verifier: randomBytes(32).toString("base64url"),
       state: randomBytes(32).toString("base64url"),
-      expiresAt: Date.now() + 10 * 60_000,
+      expiresAt: Date.now() + PENDING_LIFETIME_MS,
     };
     const url = new URL(pending.metadata.authorization_endpoint);
     url.search = new URLSearchParams({
@@ -141,8 +145,15 @@ export class OAuth {
 
   async finish(callback: string) {
     const { pending } = await this.store.get(this.resource);
-    if (!pending || pending.expiresAt < Date.now())
-      throw usage("No unexpired pending login", [loginHint]);
+    if (!pending)
+      throw usage(`No pending login for ${this.resource}`, [
+        "Run `discourse-axi auth login --forum <url>` first; auth finish must select the same forum",
+      ]);
+    if (pending.expiresAt < Date.now())
+      throw usage(`The pending login expired at ${new Date(pending.expiresAt).toISOString()}`, [
+        loginHint,
+      ]);
+    if (!callback.trim()) throw usage("No callback URL was received on stdin");
     let url: URL;
     try {
       url = new URL(callback.trim());
@@ -209,8 +220,29 @@ export class OAuth {
       }),
     });
     if (!response.ok) {
-      await response.body?.cancel();
-      throw new AxiError("OAuth token exchange failed", "NOT_AUTHENTICATED", [loginHint]);
+      // Only the standard OAuth error code is read; descriptions may echo request values.
+      const body: unknown = await response.json().catch(() => undefined);
+      const error =
+        body && typeof body === "object" && "error" in body && typeof body.error === "string"
+          ? body.error
+          : undefined;
+      if (error === "invalid_grant" && values.grant_type === "authorization_code")
+        throw new AxiError(
+          "The forum rejected the authorization code: it expired, was already used, or belongs to another login",
+          "NOT_AUTHENTICATED",
+          [
+            "Run `discourse-axi auth login --forum <url>`, approve, and run auth finish right away (forum codes last 300 seconds by default)",
+          ],
+        );
+      if (error === "invalid_grant")
+        throw new AxiError("The forum rejected the stored refresh token", "NOT_AUTHENTICATED", [
+          loginHint,
+        ]);
+      throw new AxiError(
+        `OAuth token exchange failed (HTTP ${response.status}${error && /^[a-z_]+$/.test(error) ? `, ${error}` : ""})`,
+        "NOT_AUTHENTICATED",
+        [loginHint],
+      );
     }
     const result = TokenResponse.safeParse(await response.json());
     if (!result.success || result.data.token_type.toLowerCase() !== "bearer")
@@ -250,11 +282,15 @@ export class OAuth {
   async status() {
     if (this.env.DISCOURSE_AXI_MCP_TOKEN) return { status: "environment-token", verified: false };
     const { grant, pending } = await this.store.get(this.resource);
-    if (!grant)
-      return {
-        status: pending && pending.expiresAt > Date.now() ? "login-pending" : "not-logged-in",
-        help: [loginHint],
-      };
+    if (!grant) {
+      if (pending && pending.expiresAt > Date.now())
+        return {
+          status: "login-pending",
+          clientId: pending.clientId,
+          pendingExpiresAt: new Date(pending.expiresAt).toISOString(),
+        };
+      return { status: "not-logged-in" };
+    }
     return {
       status: grant.expiresAt !== undefined && grant.expiresAt <= Date.now() ? "expired" : "stored",
       verified: false,

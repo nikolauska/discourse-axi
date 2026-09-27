@@ -103,11 +103,28 @@ test("environment bearer bypasses OAuth and pending state is resource-bound and 
   assert.deepEqual(server.state.authorizationClients, []);
   const started = await auth.begin();
   const other = new OAuth("https://other.example/mcp", store, {});
-  await assert.rejects(other.finish(server.callback(started.authorizationUrl)), /No unexpired/);
+  await assert.rejects(other.finish(server.callback(started.authorizationUrl)), {
+    code: "VALIDATION_ERROR",
+  });
   await store.update(server.resource, (entry) => ({
     ...entry,
     pending: { ...started.pending, expiresAt: 0 },
   }));
-  await assert.rejects(auth.finish(server.callback(started.authorizationUrl)), /No unexpired/);
+  await assert.rejects(auth.finish(server.callback(started.authorizationUrl)), {
+    code: "VALIDATION_ERROR",
+  });
   assert.deepEqual(server.state.tokenClients, []);
+});
+
+test("a login approved long after auth login still finishes; a rejected forum code needs re-login", async (t) => {
+  const { server, auth } = await setup(t);
+  const started = await auth.begin();
+  // The forum's code clock starts at approval, so a slow human must not expire local state.
+  t.mock.timers.enable({ apis: ["Date"], now: Date.now() + 45 * 60_000 });
+  await assert.rejects(
+    auth.finish(server.callback(started.authorizationUrl, { code: "expired-or-used" })),
+    { code: "NOT_AUTHENTICATED" },
+  );
+  const result = await auth.finish(server.callback(started.authorizationUrl));
+  assert.equal(result.status, "authenticated");
 });

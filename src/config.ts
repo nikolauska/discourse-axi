@@ -41,11 +41,8 @@ export async function gitRoot(cwd: string): Promise<string | undefined> {
   }
 }
 
-export async function resolveForum(
-  explicit: string | undefined,
-  env: NodeJS.ProcessEnv,
-  cwd: string,
-) {
+/** Returns undefined when nothing selects a forum, so the home view can explain setup instead of failing. */
+export async function findForum(explicit: string | undefined, env: NodeJS.ProcessEnv, cwd: string) {
   let value = explicit ?? env.DISCOURSE_AXI_FORUM_URL;
   if (!value) {
     const root = await gitRoot(cwd);
@@ -57,19 +54,35 @@ export async function resolveForum(
       }
     }
   }
-  if (!value)
-    throw usage("No forum configured", [
-      "Pass --forum <base-url>, set DISCOURSE_AXI_FORUM_URL, or run `discourse-axi init --forum <url>`",
-    ]);
+  if (!value) return undefined;
   const forum = safeUrl(value).href.replace(/\/+$/, "");
   const resource = safeUrl(env.DISCOURSE_AXI_MCP_URL ?? `${forum}/mcp`).href;
   return { forum, resource };
 }
 
+export async function resolveForum(
+  explicit: string | undefined,
+  env: NodeJS.ProcessEnv,
+  cwd: string,
+) {
+  const selected = await findForum(explicit, env, cwd);
+  if (!selected)
+    throw usage("No forum configured", [
+      "Pass --forum <base-url>, set DISCOURSE_AXI_FORUM_URL, or run `discourse-axi init --forum <url>`",
+    ]);
+  return selected;
+}
+
 export async function bindForum(cwd: string, forum: string, force: boolean) {
   const root = await gitRoot(cwd);
-  if (!root) throw usage("init requires a Git repository");
+  if (!root)
+    throw usage("init requires a Git repository", [
+      "Run it inside a Git worktree, or pass --forum <url> or set DISCOURSE_AXI_FORUM_URL instead",
+    ]);
   const path = join(root, ".discourse-forum");
+  const current = await readFile(path, "utf8").catch(() => undefined);
+  // Re-binding the same forum is already satisfied, so it succeeds instead of demanding --force.
+  if (current?.trim() === forum) return { status: "unchanged", forum, binding: path };
   try {
     await writeFile(path, `${forum}\n`, { flag: force ? "w" : "wx" });
   } catch (error) {
@@ -80,7 +93,7 @@ export async function bindForum(cwd: string, forum: string, force: boolean) {
     }
     throw error;
   }
-  return { forum, binding: path };
+  return { status: current === undefined ? "bound" : "replaced", forum, binding: path };
 }
 
 export function statePaths(env: NodeJS.ProcessEnv) {

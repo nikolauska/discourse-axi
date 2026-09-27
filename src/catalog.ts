@@ -9,12 +9,13 @@ import { kebab, toolFlags } from "./args.ts";
 import { discover } from "./mcp.ts";
 import type { McpLike } from "./mcp.ts";
 
-const builtins: Record<string, true> = {
+// update is axi-sdk-js's self-update command; a forum tool must never shadow it.
+export const builtins: Record<string, true> = {
   auth: true,
   init: true,
   tools: true,
   help: true,
-  version: true,
+  update: true,
 };
 const Cached = z.object({ savedAt: z.number(), tools: z.array(ToolSchema) });
 
@@ -69,38 +70,114 @@ export class Catalog {
   }
 }
 
-export function toolHelp(name: string, tool: Tool) {
+const constraintKeys = [
+  "enum",
+  "const",
+  "default",
+  "format",
+  "pattern",
+  "minimum",
+  "maximum",
+  "exclusiveMinimum",
+  "exclusiveMaximum",
+  "minLength",
+  "maxLength",
+  "minItems",
+  "maxItems",
+  "uniqueItems",
+] as const;
+
+function constraints(schema: unknown) {
+  const result: Record<string, unknown> = {};
+  if (!schema || typeof schema !== "object") return result;
+  for (const key of constraintKeys)
+    if (Object.hasOwn(schema, key)) result[key] = (schema as Record<string, unknown>)[key];
+  return result;
+}
+
+export function toolHelp(name: string, tool: Tool, full: boolean) {
   const flags = toolFlags(tool);
+  const properties = tool.inputSchema.properties ?? {};
+  const required = tool.inputSchema.required ?? [];
+  const flagged = new Set(Object.values(flags).flatMap((flag) => (flag.key ? [flag.key] : [])));
+  const jsonOnly = Object.keys(properties).filter((key) => !flagged.has(key));
+  // Top-level composition can require inputs no single property flag expresses.
+  const composed = [
+    "allOf",
+    "anyOf",
+    "oneOf",
+    "not",
+    "if",
+    "dependentRequired",
+    "dependentSchemas",
+  ].filter((key) => Object.hasOwn(tool.inputSchema, key));
   return {
-    usage: `discourse-axi ${name} [flags] --forum <url>`,
+    command: name,
     tool: tool.name,
+    usage: `discourse-axi ${name} ${Object.entries(flags)
+      .filter(([, flag]) => flag.key && required.includes(flag.key))
+      .map(([flag]) => `--${flag} <value>`)
+      .concat("[flags]")
+      .join(" ")}`,
     description: tool.description ?? "",
-    annotations: tool.annotations ?? {},
-    flags: Object.entries(flags).map(([flag, value]) => ({
-      flag: `--${flag}`,
-      type: value.type,
-      repeatable: Boolean(value.array),
-      required: value.key ? (tool.inputSchema.required ?? []).includes(value.key) : false,
-      ...(value.key
-        ? { property: value.key, schema: tool.inputSchema.properties?.[value.key] }
-        : {}),
-    })),
-    inputSchema: tool.inputSchema,
+    annotations: tool.annotations ?? "none",
+    flags: Object.entries(flags)
+      .filter(([, flag]) => flag.key)
+      .map(([flag, value]) => {
+        const schema = properties[value.key!] as Record<string, unknown> | undefined;
+        const items = value.array ? schema?.items : undefined;
+        return {
+          flag: `--${flag}`,
+          type: value.array ? `${value.type}[] (repeat per item)` : value.type,
+          required: required.includes(value.key!),
+          ...(typeof schema?.description === "string" ? { description: schema.description } : {}),
+          ...constraints(schema),
+          ...(items && Object.keys(constraints(items)).length > 0
+            ? { items: constraints(items) }
+            : {}),
+        };
+      }),
+    ...(jsonOnly.length > 0
+      ? {
+          jsonOnly: jsonOnly.map((key) => ({
+            property: key,
+            required: required.includes(key),
+            schema: properties[key],
+          })),
+        }
+      : {}),
+    ...(composed.length > 0 ? { schemaRules: composed.join(", ") } : {}),
+    ...(full ? { inputSchema: tool.inputSchema } : {}),
+    commonFlags: {
+      "--json '<object>'": "inputs by exact property name; the only way to pass jsonOnly inputs",
+      "--full": "no local truncation of results",
+      "--forum <url>": "forum to call",
+    },
     help: [
-      "--json '<object>' accepts nested objects, unions, exact property names and flags that collide with built-ins",
-      "Do not repeat a property in both --json and a flag",
-      "Boolean flags accept --flag or --flag=false; array flags repeat once per item",
-      "--full disables local text truncation",
+      ...(full
+        ? []
+        : [`Run \`discourse-axi ${name} --help --full\` for the complete input schema`]),
+      ...(tool.annotations?.readOnlyHint === true
+        ? []
+        : ["Not marked read-only: get the user's authorization before running it"]),
     ],
   };
 }
 
-export function toolRows(tools: Tool[]) {
-  return [...commands(tools)].map(([command, tool]) => ({
-    command,
-    tool: tool.name,
-    description: tool.description ?? "",
-    readOnly: tool.annotations?.readOnlyHint ?? "unspecified",
-    destructive: tool.annotations?.destructiveHint ?? "unspecified",
-  }));
+const DESCRIPTION_PREVIEW = 160;
+
+export function toolRows(tools: Tool[], full: boolean) {
+  return [...commands(tools)].map(([command, tool]) => {
+    const description = tool.description ?? "";
+    const firstLine = description.split("\n", 1)[0];
+    const short =
+      firstLine.length > DESCRIPTION_PREVIEW ? firstLine.slice(0, DESCRIPTION_PREVIEW) : firstLine;
+    return {
+      command,
+      tool: tool.name,
+      description: full || short === description ? description : `${short.trimEnd()} …[truncated]`,
+      readOnly: tool.annotations?.readOnlyHint ?? "unspecified",
+      destructive: tool.annotations?.destructiveHint ?? "unspecified",
+    };
+  });
 }
