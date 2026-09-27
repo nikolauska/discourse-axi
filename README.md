@@ -6,17 +6,14 @@ Requires Node.js 24+. Package: `@nikolauska/discourse-axi`, executable: `discour
 
 ## Install and discover
 
-Build a local package:
+Install from a local package tarball:
 
 ```sh
-npm ci
-npm run check
-npm pack
 npm install --global ./nikolauska-discourse-axi-0.1.0.tgz
 discourse-axi --help
 ```
 
-Installing the executable does not install agent instructions or change agent configuration. The package includes `skills/discourse-axi/SKILL.md`; install that skill separately through your agent host's supported mechanism. Its source is `src/skill.ts`; regenerate with `npm run build:skill`.
+Installing the executable does not install agent instructions or change agent configuration. The package includes `skills/discourse-axi/SKILL.md`; install that skill separately through your agent host's supported mechanism.
 
 ```sh
 discourse-axi auth login --forum https://forum.example.org
@@ -103,9 +100,3 @@ Progress goes to stderr; results and structured errors go to stdout. Exit codes:
 - The CLI cannot detect a client rejection rendered as an HTML page only in an authenticated browser, with no OAuth error callback. Ask the administrator to approve a preset; a browser-only rejection does not justify treating login as successful.
 - Remote `$ref` schemas and nonstandard schema dialects are unsupported; an unresolvable schema fails before sending. Complex properties use `--json` rather than invented flags.
 - MCP resources, prompts, interactive elicitation and sampling are not CLI commands. This package exposes tools, as requested. Tools requiring client-side interactive capabilities cannot complete through this CLI.
-
-## Development
-
-`npm run check` runs formatting, lint, strict typecheck, generated-skill consistency and local fixture tests. Tests generate fake credentials at runtime and never contact live forums. `npm pack` builds the distributable; CI installs that tarball into a temporary prefix and exercises help. CI has no publishing step.
-
-The installed-package smoke path also works against the local fixture: manual OAuth login with Codex rejection, Claude Code fallback, private-stdin completion, refresh using the saved client, multi-page discovery, generated help and a read-only search. This does not substitute for user-approved live forum verification.
