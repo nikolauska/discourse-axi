@@ -1,0 +1,46 @@
+{
+  "name": "@nikolauska/discourse-axi",
+  "version": "0.1.0",
+  "description": "Agent-facing CLI generated from Discourse MCP tools",
+  "license": "MIT",
+  "author": "nikolauska",
+  "bin": {
+    "discourse-axi": "dist/bin.js"
+  },
+  "files": [
+    "dist",
+    "skills",
+    "LICENSE",
+    "README.md"
+  ],
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "build:skill": "node scripts/build-skill.ts",
+    "format": "oxfmt .",
+    "format:check": "oxfmt --check .",
+    "lint": "oxlint",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test test/*.test.ts",
+    "check": "npm run format:check && npm run lint && npm run typecheck && npm run build:skill -- --check && npm test",
+    "prepack": "npm run build && npm run build:skill",
+    "prepublishOnly": "npm run check"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "@toon-format/toon": "^2.3.1",
+    "ajv": "^8.17.1",
+    "ajv-formats": "^3.0.1",
+    "axi-sdk-js": "^0.1.11",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "^26.5.0",
+    "oxfmt": "^0.67.0",
+    "oxlint": "^1.82.0",
+    "typescript": "^7.0.2"
+  },
+  "engines": {
+    "node": ">=24"
+  }
+}
