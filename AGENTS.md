@@ -9,7 +9,7 @@ This repository builds `discourse-axi`, an agent-facing CLI generated from Disco
 - Dispatch, TOON rendering and exit codes go through axi-sdk-js `runAxiCli` in `src/cli.ts`; `update` is the SDK's self-update command.
 - `src/skill.ts` supplies built-in help and the shipped skill. `--help` output is the complete agent reference; the skill stays minimal and points to it. Run `npm run build:skill` after changing it; commit `skills/discourse-axi/SKILL.md` rather than editing the generated file directly.
 - Finish behavior end to end, exercise the affected CLI path, and fix failures caused by the change. Local tests use disposable loopback fixtures and may be run, fixed and rerun without pausing. `npm test` runs them; `npm run check` adds formatting, lint, typecheck and generated-skill consistency.
-- Read README.md when changing authentication, command generation or packaging; update the documented contract with the code.
+- Read `docs/domain.md` and the relevant `docs/domain/` topic when changing customer-visible behavior (forum selection, sign-in, command generation, output, limits), and update it with the code. README.md covers only the introduction and installation; update it when install steps or packaging change.
 
 ## State and external effects
 
