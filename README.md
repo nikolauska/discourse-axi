@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/discourse-axi.png" alt="discourse-axi: AI agents and Discourse, from the command line">
+</p>
+
 <h1 align="center">discourse-axi</h1>
 
 <p align="center">A command-line tool that lets AI agents work with Discourse forums.</p>
